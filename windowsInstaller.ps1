@@ -1,7 +1,33 @@
 ##########################################################
 ########## Created by Luciano Guimaraes Garcia ###########
-################### Master Script V6 #####################
+################## Master Script V1.1 ####################
 ##########################################################
+
+function Show-Logo 
+{
+    # Define ANSI color codes (Equivalent to Bash variables)
+    $e = [char]27
+    $GREEN     = "$e[32m"
+    $YELLOW    = "$e[33m"
+    $BLUE      = "$e[34m"
+    $GRAY_DARK = "$e[90m"  # Bright Black
+    $WHITE     = "$e[97m"  # Bright White
+    $NC        = "$e[0m"   # No Color (Reset)
+
+    Write-Host ""
+    Write-Host "$GREEN###############################$GRAY_DARK#$NC"
+    Write-Host "$GREEN# $YELLOW`LL$GRAY_DARK`L            $BLUE`GGGGGGG$GRAY_DARK`G      $GREEN #$GRAY_DARK##$NC"
+    Write-Host "$GREEN# $YELLOW`LL$GRAY_DARK`L            $BLUE`GG$GRAY_DARK`G           $GREEN #$GRAY_DARK###$NC"
+    Write-Host "$GREEN# $YELLOW`LL$GRAY_DARK`L            $BLUE`GG$GRAY_DARK`G $BLUE`GGGG$GRAY_DARK`G      $GREEN#$GRAY_DARK###$NC"
+    Write-Host "$GREEN# $YELLOW`LL$GRAY_DARK`L            $BLUE`GG$GRAY_DARK`G   $BLUE`GG$GRAY_DARK`G      $GREEN#$GRAY_DARK###$NC"
+    Write-Host "$GREEN# $YELLOW`LLLLLLL$GRAY_DARK`L $WHITE X$GRAY_DARK`X  $BLUE`GGGGGGGG$GRAY_DARK`G  $WHITE`X$GRAY_DARK`X $GREEN#$GRAY_DARK###$NC"
+    Write-Host "$GREEN###############################$GRAY_DARK###$NC"
+    Write-Host "$GREEN#       $WHITE`LUCIANOGG.INFO        $GREEN#$GRAY_DARK###$NC"
+    Write-Host "$GREEN###############################$GRAY_DARK###$NC"
+    Write-Host "$GRAY_DARK##################################$NC"
+    Write-Host "$GRAY_DARK #################################$NC"
+    Write-Host ""
+}
 
 function banner
 {	
@@ -39,6 +65,7 @@ function menu
 {
 	$menuOptions = @(
 		[PSCustomObject]@{ Option = "Configuring Tasks"; Value = "CONFIGURE" }
+		[PSCustomObject]@{ Option = "Installing (Chocolatey)"; Value = "INSTALL" }
 		[PSCustomObject]@{ Option = "Backuping Tasks"; Value = "BACKUP" }
 		[PSCustomObject]@{ Option = "Windows Tools"; Value = "WIN_TOOLS" }
 		[PSCustomObject]@{ Option = "EXIT"; Value = "EXIT" }
@@ -56,6 +83,15 @@ function menu
 				@{ Name = "Verify Bitlocker"; Action = "VerifyBitlocker" }
 			)
 			$choice = $subOptions | ForEach-Object { [PSCustomObject]$_ } | Out-GridView -Title "Configuring Tasks" -PassThru
+			if ($choice) { & $choice.Action }
+		}		
+		
+		"INSTALL" {
+			$subOptions = @(
+				@{ Name = "Install Apps with Chocolatey"; Action = "installAppChocolatey" }
+				@{ Name = "Update Apps with Chocolatey"; Action = "updateAllChoco" }
+			)
+			$choice = $subOptions | ForEach-Object { [PSCustomObject]$_ } | Out-GridView -Title "Installing (Chocolatey)" -PassThru
 			if ($choice) { & $choice.Action }
 		}
 		
@@ -976,7 +1012,172 @@ function updateAll
 	pause
 }
 
-$GLOBAL:cred=GetCreds
+function installAppChocolatey
+{
+    $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)    
+    if (-not $isAdmin) {
+        Write-Warning "ERROR - This script must be run as Administrator."
+        pause
+        return
+    }
+
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+
+    Clear-Host
+    Write-Host ">>> STARTING PACKAGE INSTALLER <<<" -ForegroundColor Cyan
+    Write-Host "Please wait while we check requirements..." -ForegroundColor Yellow
+
+    $logEntries = [System.Collections.Generic.List[PSObject]]::new()
+    function Add-Log {
+        param ($Message, $Status)
+        $timestamp = Get-Date -Format "HH:mm:ss"
+        
+        if ($Status -eq "Error" -or $Status -eq "Critical Error") { 
+            Write-Host "[$timestamp] [ERROR] $Message" -ForegroundColor Red 
+        }
+        elseif ($Status -eq "Success") { 
+            Write-Host "[$timestamp] [OK] $Message" -ForegroundColor Green 
+        }
+        else { 
+            Write-Host "[$timestamp] [INFO] $Message" -ForegroundColor Gray 
+        }
+        $logEntries.Add([PSCustomObject]@{
+            Timestamp = $timestamp
+            Status    = $Status
+            Message   = $Message
+        })
+    }
+
+    $chocoPath = "$env:ProgramData\chocolatey\bin\choco.exe"
+
+    if (-not (Test-Path $chocoPath) -and -not (Get-Command choco -ErrorAction SilentlyContinue)) {
+        try {
+            Write-Progress -Activity "Initial Setup" -Status "Installing Chocolatey (This may take a few minutes)..." -PercentComplete 0
+            Add-Log -Status "Processing" -Message "Chocolatey not found. Starting download and installation..."
+            
+            Set-ExecutionPolicy Bypass -Scope Process -Force
+            [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+            Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+            
+            Write-Progress -Activity "Initial Setup" -Completed
+
+            if (Test-Path $chocoPath) {
+                Add-Log -Status "Success" -Message "Chocolatey installed successfully."
+            }
+            else {
+                throw "Post-installation verification of Chocolatey failed."
+            }
+        }
+        catch {
+            Add-Log -Status "Critical Error" -Message "Fatal error installing Chocolatey - $($_.Exception.Message)"
+            return
+        }
+    }
+    else {
+        Add-Log -Status "Info" -Message "Chocolatey is already installed."
+    }
+
+    if (Test-Path $chocoPath) { $chocoExe = $chocoPath } else { $chocoExe = "choco" }
+
+    $pkgList = @(
+        "adobereader", "vlc", "winrar", "7zip", "libreoffice", "firefox", "aimp", "speedfan", 
+        "googlechrome", "notepadplusplus", "codeblocks", "dia", "eclipse", "filezilla", 
+        "putty.install", "webex-meeting", "angryip", "wireshark", "gimp", "kdenlive", 
+        "audacity", "obs-studio", "tor-browser", "nextcloud-client", "bitwarden", "TeamViewer", 
+        "anydesk", "qbittorrent", "discord", "brave", "winfetch", "bleachbit", "chromium", 
+        "thunderbird", "transmission", "remmina", "openvpn", "virtualbox", "blender", "tmux", 
+        "vivaldi", "opera", "telegram.install", "signal-desktop", "zoom"
+    ) | Sort-Object
+
+    Write-Host "`nOpening selection window..." -ForegroundColor Yellow
+    
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = "Software Installer"
+    $form.Size = New-Object System.Drawing.Size(400, 600)
+    $form.StartPosition = "CenterScreen"
+    $form.FormBorderStyle = "FixedDialog"
+    $form.MaximizeBox = $false
+
+    $checkList = New-Object System.Windows.Forms.CheckedListBox
+    $checkList.Location = New-Object System.Drawing.Point(12, 12)
+    $checkList.Size = New-Object System.Drawing.Size(360, 480)
+    $checkList.CheckOnClick = $true
+    $checkList.ScrollAlwaysVisible = $true
+
+    foreach ($pkg in $pkgList) { [void]$checkList.Items.Add($pkg) }
+
+    $btnAll = New-Object System.Windows.Forms.Button
+    $btnAll.Location = New-Object System.Drawing.Point(12, 510)
+    $btnAll.Size = New-Object System.Drawing.Size(100, 30)
+    $btnAll.Text = "Select ALL"
+    $btnAll.Add_Click({
+        for ($i = 0; $i -lt $checkList.Items.Count; $i++) { $checkList.SetItemChecked($i, $true) }
+    })
+
+    $btnOk = New-Object System.Windows.Forms.Button
+    $btnOk.Location = New-Object System.Drawing.Point(190, 510)
+    $btnOk.Size = New-Object System.Drawing.Size(80, 30)
+    $btnOk.Text = "Install"
+    $btnOk.DialogResult = [System.Windows.Forms.DialogResult]::OK
+    $btnOk.BackColor = [System.Drawing.Color]::LightGreen
+
+    $btnCancel = New-Object System.Windows.Forms.Button
+    $btnCancel.Location = New-Object System.Drawing.Point(280, 510)
+    $btnCancel.Size = New-Object System.Drawing.Size(80, 30)
+    $btnCancel.Text = "Cancel"
+    $btnCancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+
+
+    $form.Controls.AddRange(@($checkList, $btnAll, $btnOk, $btnCancel))
+    $result = $form.ShowDialog()
+
+    if ($result -ne [System.Windows.Forms.DialogResult]::OK) {
+        Add-Log -Status "Warning" -Message "Operation cancelled by user."
+        return
+    }
+    $selectedPackages = $checkList.CheckedItems
+    if ($selectedPackages.Count -eq 0) {
+        Add-Log -Status "Warning" -Message "No packages selected."
+        return
+    }
+
+    $total = $selectedPackages.Count
+    $count = 0
+    foreach ($pkg in $selectedPackages) {
+        $count++
+        $percent = [math]::Round(($count / $total) * 100)        
+        Write-Progress -Activity "Installing Software ($count of $total)" -Status "Installing now $pkg" -PercentComplete $percent
+        Add-Log -Status "Processing" -Message "Starting installation of $pkg..."        
+        try {
+            $proc = Start-Process -FilePath $chocoExe -ArgumentList "install -y $pkg" -Wait -PassThru -WindowStyle Normal
+            
+            if ($proc.ExitCode -eq 0) {
+                Add-Log -Status "Success" -Message "$pkg installed OK."
+            }
+            elseif ($proc.ExitCode -eq 1641 -or $proc.ExitCode -eq 3010) {
+                Add-Log -Status "Success" -Message "$pkg installed (Restart pending)."
+            }
+            else {
+                Add-Log -Status "Error" -Message "Error installing $pkg (Code $($proc.ExitCode))."
+            }
+        }
+        catch {
+            Add-Log -Status "Error" -Message "Exception installing $pkg - $($_.Exception.Message)"
+        }
+    }
+
+    Write-Progress -Activity "Installing Software" -Completed
+    Add-Log -Status "Info" -Message "All tasks finished."
+    $logEntries | Out-GridView -Title "Final Installation Report" -Wait
+}
+
+function updateAllChoco
+{
+	choco upgrade all -y
+}
+
+Show-Logo
 $condition=1
 cls
 banner
