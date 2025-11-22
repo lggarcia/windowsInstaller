@@ -1,9 +1,9 @@
 ##########################################################
 ########## Created by Luciano Guimaraes Garcia ###########
-################## Master Script V1.1 ####################
+################## Master Script V1-1 ####################
 ##########################################################
 
-function Show-Logo 
+function Show-Logo
 {
     # Define ANSI color codes (Equivalent to Bash variables)
     $e = [char]27
@@ -1178,6 +1178,7 @@ function updateAllChoco
 }
 
 Show-Logo
+sleep 3
 $condition=1
 cls
 banner
